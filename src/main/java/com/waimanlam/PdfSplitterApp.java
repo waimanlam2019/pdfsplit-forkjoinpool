@@ -60,29 +60,39 @@ public class PdfSplitterApp extends Application {
     }
 
     private void splitPdf(File pdfFile) throws IOException {
-        PDDocument document = PDDocument.load(pdfFile);
-        int totalPages = document.getNumberOfPages();
-        document.close();
+        
 
         // Output directory
         String timestamp = programStart.format(folderFormat);
         File outputDir = new File(pdfFile.getParentFile(), "output_" + timestamp);
         outputDir.mkdir();
-
-        // Launch task using ForkJoinPool
-        pool.invoke(new PdfSplitTask(pdfFile, outputDir, 0, totalPages));
+        
+        PDDocument sourceDoc = null;
+        try {
+	        sourceDoc = PDDocument.load(pdfFile);
+	        
+	        // Launch task using ForkJoinPool    
+            ForkJoinPool.commonPool().invoke(
+                new PdfSplitTask(sourceDoc, outputDir, 0, sourceDoc.getNumberOfPages())
+            );
+        } finally {
+        	if ( sourceDoc != null ) {
+        		sourceDoc.close();
+        	}
+        }
     }
 
     // RecursiveAction for splitting PDF pages
     static class PdfSplitTask extends RecursiveAction {
-        private final File sourcePdf;
+    	private final PDDocument sourceDoc;
         private final File outputDir;
         private final int startPage;
         private final int endPage;
         private static final int THRESHOLD = 5;
+       
 
-        PdfSplitTask(File sourcePdf, File outputDir, int startPage, int endPage) {
-            this.sourcePdf = sourcePdf;
+        PdfSplitTask(PDDocument sourceDoc, File outputDir, int startPage, int endPage) {
+        	this.sourceDoc = sourceDoc;
             this.outputDir = outputDir;
             this.startPage = startPage;
             this.endPage = endPage;
@@ -91,10 +101,10 @@ public class PdfSplitterApp extends Application {
         @Override
         protected void compute() {
             if ((endPage - startPage) <= THRESHOLD) {
-                try (PDDocument document = PDDocument.load(sourcePdf)) {
+                try {
                     for (int i = startPage; i < endPage; i++) {
                         PDDocument singlePage = new PDDocument();
-                        singlePage.addPage(document.getPage(i));
+                        singlePage.addPage(sourceDoc.getPage(i));
                         File outFile = new File(outputDir, "page_" + (i + 1) + ".pdf");
                         singlePage.save(outFile);
                         singlePage.close();
@@ -105,8 +115,8 @@ public class PdfSplitterApp extends Application {
             } else {
                 int mid = (startPage + endPage) / 2;
                 invokeAll(
-                        new PdfSplitTask(sourcePdf, outputDir, startPage, mid),
-                        new PdfSplitTask(sourcePdf, outputDir, mid, endPage)
+                        new PdfSplitTask(sourceDoc, outputDir, startPage, mid),
+                        new PdfSplitTask(sourceDoc, outputDir, mid, endPage)
                 );
             }
         }
